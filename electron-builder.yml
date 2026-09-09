@@ -1,0 +1,9 @@
+appId: com.sothana.momlens
+productName: mom-lens
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**
+  - package.json
+npmRebuild: false
