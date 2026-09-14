@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { CH } from '@shared/ipc'
-import type { ExecRequest, ListRequest, LogRequest, ResourceScopeRef } from '@shared/types'
+import type { ExecRequest, ListPageRequest, ListRequest, LogRequest, ResourceScopeRef } from '@shared/types'
 import * as kubeconfig from '../k8s/kubeconfig'
 import * as resources from '../k8s/resources'
 import * as metrics from '../k8s/metrics'
@@ -29,6 +29,10 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.listResources, async (_event, req: ListRequest) => {
     return resources.listResources(req)
+  })
+
+  ipcMain.handle(CH.listResourcesPage, async (_event, req: ListPageRequest) => {
+    return resources.listResourcesPage(req)
   })
 
   ipcMain.handle(CH.getResource, async (_event, ref: ResourceScopeRef) => {

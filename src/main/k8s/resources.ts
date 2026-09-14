@@ -4,6 +4,8 @@ import { apiVersionOf, findResourceKind } from '@shared/types'
 import type {
   ActionResult,
   KubeObject,
+  ListPage,
+  ListPageRequest,
   ListRequest,
   ResourceKind,
   ResourceScopeRef
@@ -36,6 +38,33 @@ export async function listResources(req: ListRequest): Promise<KubeObject[]> {
   } catch {
     return []
   }
+}
+
+/**
+ * One page of a list call using the API server's own pagination (`limit` +
+ * `continue`). Only the returned page is serialized server-side, which is what
+ * actually reduces API-server load for large collections.
+ */
+export async function listResourcesPage(req: ListPageRequest): Promise<ListPage> {
+  const { scope } = req
+  const ns = namespaceFor(scope, req.namespace, req.allNamespaces)
+  const res = await client().list(
+    apiVersionOf(scope),
+    scope.kind,
+    ns,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    req.limit,
+    req.continueToken
+  )
+  const b = asBody(res)
+  const items = (b?.items ?? []) as KubeObject[]
+  // The client's V1ListMeta model maps the reserved word `continue` to `_continue`.
+  const next = b?.metadata?._continue ?? b?.metadata?.continue
+  return { items, continueToken: next || undefined }
 }
 
 export async function listNodes(): Promise<KubeObject[]> {

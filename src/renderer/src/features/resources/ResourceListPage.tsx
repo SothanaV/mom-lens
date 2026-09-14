@@ -57,17 +57,24 @@ export default function ResourceListPage() {
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [pageSize, setPageSize] = useState(50)
+  const [continueToken, setContinueToken] = useState<string | undefined>(undefined)
+  const [loadingMore, setLoadingMore] = useState(false)
 
+  // First page (and resets) go through the paged API so the API server only
+  // serializes one page at a time.
   useEffect(() => {
     if (!req || !window.api) return
     let cancelled = false
     setLoading(true)
     setError(null)
+    setContinueToken(undefined)
     window.api.k8s
-      .listResources(req)
-      .then((list) => {
+      .listResourcesPage({ ...req, limit: pageSize })
+      .then((page) => {
         if (cancelled) return
-        setItems(sortItems(list, showNamespace))
+        setItems(sortItems(page.items, showNamespace))
+        setContinueToken(page.continueToken)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -78,7 +85,30 @@ export default function ResourceListPage() {
     return () => {
       cancelled = true
     }
-  }, [req, reloadKey, showNamespace])
+  }, [req, reloadKey, showNamespace, pageSize])
+
+  const loadMore = async (): Promise<void> => {
+    if (!req || !window.api || !continueToken || loadingMore) return
+    setLoadingMore(true)
+    setError(null)
+    try {
+      const page = await window.api.k8s.listResourcesPage({
+        ...req,
+        limit: pageSize,
+        continueToken
+      })
+      setItems((prev) => {
+        const seen = new Set(prev.map((o) => objKey(o)))
+        const merged = prev.concat(page.items.filter((o) => !seen.has(objKey(o))))
+        return sortItems(merged, showNamespace)
+      })
+      setContinueToken(page.continueToken)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     if (!req || !window.api) return
@@ -157,6 +187,21 @@ export default function ResourceListPage() {
             ×
           </button>
         )}
+        <label className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          Page size
+          <select
+            className="select"
+            style={{ padding: '2px 4px', fontSize: 12 }}
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            title="Items fetched per API request"
+          >
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={250}>250</option>
+          </select>
+        </label>
         <button className="btn" type="button" onClick={() => setCreating(true)}>
           Create
         </button>
@@ -206,6 +251,17 @@ export default function ResourceListPage() {
           showNamespace={showNamespace}
           nsQuery={nsParam}
         />
+      )}
+
+      {!loading && continueToken && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4 }}>
+          <button className="btn" type="button" disabled={loadingMore} onClick={() => void loadMore()}>
+            {loadingMore ? 'Loading…' : `Load ${pageSize} more`}
+          </button>
+          <span style={{ opacity: 0.7, fontSize: 12 }}>
+            {items.length} loaded — more pages available on the server
+          </span>
+        </div>
       )}
 
       {creating && (

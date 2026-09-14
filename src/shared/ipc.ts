@@ -8,6 +8,7 @@ export const CH = {
   listNodes: 'k8s:listNodes',
   listNamespaces: 'k8s:listNamespaces',
   listResources: 'k8s:listResources',
+  listResourcesPage: 'k8s:listResourcesPage',
   getResource: 'k8s:getResource',
   deleteResource: 'k8s:deleteResource',
   applyYaml: 'k8s:applyYaml',

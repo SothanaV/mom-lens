@@ -58,6 +58,20 @@ export interface ListRequest {
   allNamespaces?: boolean
 }
 
+/** Paged variant of ListRequest (server-side `limit` + `continue`). */
+export interface ListPageRequest extends ListRequest {
+  /** Max items the API server should serialize for this page. */
+  limit: number
+  /** Opaque token from the previous page; omit for the first page. */
+  continueToken?: string
+}
+
+export interface ListPage {
+  items: KubeObject[]
+  /** Present while the server has more pages left. */
+  continueToken?: string
+}
+
 export interface LogRequest {
   namespace: string
   podName: string
@@ -153,6 +167,7 @@ export interface SoLensApi {
     listNodes(): Promise<KubeObject[]>
     listNamespaces(): Promise<KubeObject[]>
     listResources(req: ListRequest): Promise<KubeObject[]>
+    listResourcesPage(req: ListPageRequest): Promise<ListPage>
     getResource(ref: ResourceScopeRef): Promise<KubeObject>
     deleteResource(ref: ResourceScopeRef): Promise<ActionResult>
     applyYaml(yaml: string): Promise<ActionResult>
