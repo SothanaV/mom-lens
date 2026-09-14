@@ -132,11 +132,15 @@ export async function logsStart(id: string, req: LogRequest, sender: Sendable): 
     if (req.previous) qs.set('previous', 'true')
     if (req.follow) qs.set('follow', '1')
 
+    // Preserve the server URL's path prefix (e.g. Rancher's /k8s/clusters/<id>).
+    // Other calls (list/watch/exec) keep it by joining onto the full server URL;
+    // this raw https request must prepend it explicitly or proxied clusters 403.
+    const prefix = url.pathname.replace(/\/+$/, '')
     const opts: RequestOptions = {
       hostname: url.hostname,
       port: url.port ? Number(url.port) : 443,
       method: 'GET',
-      path: `/api/v1/namespaces/${encodeURIComponent(req.namespace)}/pods/${encodeURIComponent(
+      path: `${prefix}/api/v1/namespaces/${encodeURIComponent(req.namespace)}/pods/${encodeURIComponent(
         req.podName
       )}/log?${qs.toString()}`
     }
