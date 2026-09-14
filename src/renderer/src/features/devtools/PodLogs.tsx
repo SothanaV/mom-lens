@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLogBuffer } from './useLogBuffer'
 import { usePodContainers } from './usePodContainers'
 import {
@@ -28,6 +28,9 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
   const [previous, setPrevious] = useState(false)
   const [timestamps, setTimestamps] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [caseSensitive, setCaseSensitive] = useState(false)
+  const [regex, setRegex] = useState(false)
   const preRef = useRef<HTMLPreElement | null>(null)
   const stickRef = useRef(true)
 
@@ -68,11 +71,34 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
     }
   }, [api, loaded, namespace, podName, activeContainer, follow, timestamps, previous, append, clear])
 
-  // Auto-scroll to bottom on new data unless the user has scrolled up.
+  // Log search: build the active matcher; invalid regex stays visible but disables filtering.
+  const { matcher, regexError } = useMemo((): { matcher: RegExp | null; regexError: string | null } => {
+    const q = query.trim()
+    if (!q) return { matcher: null, regexError: null }
+    if (regex) {
+      try {
+        return { matcher: new RegExp(q, caseSensitive ? 'g' : 'gi'), regexError: null }
+      } catch (err) {
+        return { matcher: null, regexError: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return { matcher: new RegExp(escaped, caseSensitive ? 'g' : 'gi'), regexError: null }
+  }, [query, caseSensitive, regex])
+
+  const visibleLines = useMemo((): string[] => {
+    if (!matcher) return lines
+    matcher.lastIndex = 0
+    return lines.filter((line) => {
+      matcher.lastIndex = 0
+      return matcher.test(line)
+    })
+  }, [lines, matcher])
+
   useEffect(() => {
     const el = preRef.current
     if (el && stickRef.current) el.scrollTop = el.scrollHeight
-  }, [lines])
+  }, [visibleLines])
 
   const onScroll = useCallback((): void => {
     const el = preRef.current
@@ -149,6 +175,39 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
           Timestamps
         </label>
 
+        <input
+          className="mono"
+          type="search"
+          placeholder="Search logs…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ ...selectStyle, width: 180, paddingLeft: 6 }}
+          title="Filter log lines by substring or regex"
+        />
+        <button
+          className="btn"
+          type="button"
+          style={activeStyle(caseSensitive)}
+          onClick={() => setCaseSensitive((v) => !v)}
+          title="Match case"
+        >
+          Aa
+        </button>
+        <button
+          className="btn"
+          type="button"
+          style={activeStyle(regex)}
+          onClick={() => setRegex((v) => !v)}
+          title="Regular expression"
+        >
+          .*
+        </button>
+        {query.trim() && (
+          <button className="btn" type="button" onClick={() => setQuery('')} title="Clear search">
+            ×
+          </button>
+        )}
+
         <button className="btn" style={activeStyle(follow)} onClick={() => setFollow((f) => !f)}>
           {follow ? 'Following' : 'Paused'}
         </button>
@@ -158,8 +217,25 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
         <button className="btn" onClick={onClear}>Clear</button>
         <button className="btn" onClick={onCopy}>Copy</button>
         <button className="btn" onClick={onDownload}>Download</button>
-        <span className="mono" style={{ ...labelStyle, marginLeft: 'auto' }}>{count} lines</span>
+        <span className="mono" style={{ ...labelStyle, marginLeft: 'auto' }}>
+          {matcher ? `${visibleLines.length} / ${count}` : count} lines
+        </span>
       </div>
+
+      {regexError ? (
+        <div
+          className="mono"
+          style={{
+            padding: '4px 10px',
+            borderBottom: `1px solid ${palette.border}`,
+            color: '#e5a04c',
+            background: 'rgba(229,160,76,0.08)',
+            fontSize: 12
+          }}
+        >
+          Invalid regex — search disabled: {regexError}
+        </div>
+      ) : null}
 
       {error ? (
         <div
@@ -197,11 +273,13 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
           wordBreak: wrap ? 'break-all' : 'normal'
         }}
       >
-        {lines.length > 0
-          ? lines.join('\n')
+        {visibleLines.length > 0
+          ? visibleLines.join('\n')
           : error
             ? ''
-            : `No log output from ${activeContainer ?? podName}${previous ? ' (previous)' : ''}.`}
+            : matcher && lines.length > 0
+              ? `No lines match “${query.trim()}”.`
+              : `No log output from ${activeContainer ?? podName}${previous ? ' (previous)' : ''}.`}
       </pre>
     </div>
   )

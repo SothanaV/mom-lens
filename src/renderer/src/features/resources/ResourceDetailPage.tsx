@@ -6,6 +6,7 @@ import { findResourceKind } from '@shared/types'
 import { PodLogs, PodTerminal } from '@renderer/features/devtools'
 import YamlView from './YamlView'
 import YamlEditor from './YamlEditor'
+import SecretDataPanel from './SecretDataPanel'
 import {
   dataCount,
   endpointsSummary,
@@ -168,6 +169,7 @@ export default function ResourceDetailPage() {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const [yamlVisible, setYamlVisible] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [podMetrics, setPodMetrics] = useState<PodMetrics | null>(null)
   const [nodeMetrics, setNodeMetrics] = useState<NodeMetrics | null>(null)
@@ -285,6 +287,14 @@ export default function ResourceDetailPage() {
     }
     navigate(listPath(kind.resource, searchParams.get('ns')))
   }, [kind, name, namespace, deleting, navigate, searchParams])
+
+  const applySecretDoc = useCallback(async (text: string): Promise<void> => {
+    if (!window.api) return
+    const res = await window.api.k8s.applyYaml(text)
+    if (!res.ok) throw new Error(res.message ?? 'Apply failed')
+    setNotice(res.message ?? 'Applied.')
+    setReloadKey((k) => k + 1)
+  }, [])
 
   const askAi = useCallback((): void => {
     if (!obj || !kind || !name) return
@@ -442,8 +452,42 @@ export default function ResourceDetailPage() {
             </section>
           )}
 
+          {kind.resource === 'secrets' && (
+            <section>
+              <h3>Data</h3>
+              <SecretDataPanel
+                key={String(obj.metadata?.resourceVersion ?? obj.metadata?.uid ?? name)}
+                obj={obj}
+                onApply={applySecretDoc}
+              />
+            </section>
+          )}
+
           <section>
-            <h3>YAML</h3>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: yamlVisible || editing ? 0 : 8
+              }}
+            >
+              <h3 style={{ margin: yamlVisible || editing ? undefined : 0 }}>YAML</h3>
+              {!editing && (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => setYamlVisible((v) => !v)}
+                  >
+                    {yamlVisible ? 'Hide' : 'View'}
+                  </button>
+                  <button className="btn" type="button" onClick={startEdit}>
+                    Edit
+                  </button>
+                </>
+              )}
+            </div>
             {editing ? (
               <>
                 <YamlEditor value={draft} onChange={setDraft} height="400px" editable={!saving} />
@@ -466,9 +510,9 @@ export default function ResourceDetailPage() {
                   </button>
                 </div>
               </>
-            ) : (
+            ) : yamlVisible ? (
               <YamlView obj={obj} />
-            )}
+            ) : null}
           </section>
 
           {kind.resource === 'pods' && namespace && (
