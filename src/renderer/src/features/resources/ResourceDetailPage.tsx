@@ -5,6 +5,7 @@ import type { KubeApiError, KubeObject, NodeMetrics, PodMetrics, ResourceKind } 
 import { findResourceKind } from '@shared/types'
 import { PodLogs, PodTerminal } from '@renderer/features/devtools'
 import { CallError, CallNotice, toKubeApiError } from '@renderer/components/ui/CallError'
+import { ConfirmDialog } from '@renderer/components/ui/ConfirmDialog'
 import YamlView from './YamlView'
 import YamlEditor from './YamlEditor'
 import SecretDataPanel from './SecretDataPanel'
@@ -37,6 +38,20 @@ interface SummaryField {
   label: string
   value: string
 }
+
+/**
+ * Kinds whose deletion cascades to managed children (pods, ReplicaSet
+ * ReplicaSets, whole namespaces…). They get one extra generic warning line.
+ */
+const CASCADE_ON_DELETE = new Set([
+  'deployments',
+  'statefulsets',
+  'daemonsets',
+  'replicasets',
+  'jobs',
+  'cronjobs',
+  'namespaces'
+])
 
 function UsageBar({
   used,
@@ -166,6 +181,7 @@ export default function ResourceDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<KubeApiError | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -291,9 +307,8 @@ export default function ResourceDetailPage() {
     }
   }, [kind, name, saving, draft])
 
-  const onDelete = useCallback(async () => {
+  const onDelete = useCallback(async (): Promise<void> => {
     if (!kind || !name || deleting || !window.api) return
-    if (!window.confirm(`Delete ${kind.kind} "${name}"? This cannot be undone.`)) return
     setDeleting(true)
     try {
       const res = await window.api.k8s.deleteResource({ scope: kind, namespace, name })
@@ -302,13 +317,16 @@ export default function ResourceDetailPage() {
           res.error ?? { code: 'unknown', message: res.message ?? 'Delete failed.' }
         )
         setDeleting(false)
+        setConfirmOpen(false)
         return
       }
     } catch (err) {
       setError(toKubeApiError(err))
       setDeleting(false)
+      setConfirmOpen(false)
       return
     }
+    setConfirmOpen(false)
     navigate(listPath(kind.resource, searchParams.get('ns')))
   }, [kind, name, namespace, deleting, navigate, searchParams])
 
@@ -378,12 +396,63 @@ export default function ResourceDetailPage() {
             Edit
           </button>
         )}
-        <button className="btn" type="button" disabled={deleting || !obj} onClick={() => void onDelete()}>
+        <span className="toolbar-sep" aria-hidden="true" />
+        <button
+          id="resource-delete-button"
+          className="btn danger"
+          type="button"
+          disabled={deleting || !obj}
+          onClick={() => setConfirmOpen(true)}
+        >
           {deleting ? 'Deleting…' : 'Delete'}
         </button>
       </div>
 
       {notice && <CallNotice text={notice} />}
+
+      {confirmOpen && obj && (
+        <ConfirmDialog
+          title={`Delete ${kind.kind}?`}
+          tone="danger"
+          confirmLabel="Delete"
+          requireTyping={
+            kind.resource === 'secrets' || kind.resource === 'namespaces' ? name : undefined
+          }
+          onConfirm={() => void onDelete()}
+          onCancel={() => setConfirmOpen(false)}
+          body={
+            <>
+              <p className="confirm-dialog__line">
+                You are about to delete{' '}
+                <code className="mono confirm-dialog__echo">{kind.kind}</code>
+                {namespace ? (
+                  <>
+                    {' '}
+                    in namespace{' '}
+                    <code className="mono confirm-dialog__echo">{namespace}</code>
+                  </>
+                ) : (
+                  ' (cluster-scoped)'
+                )}{' '}
+                named <code className="mono confirm-dialog__echo">{name}</code>.
+              </p>
+              <p className="confirm-dialog__line confirm-dialog__consequence">
+                This cannot be undone.
+              </p>
+              {CASCADE_ON_DELETE.has(kind.resource) && (
+                <p className="confirm-dialog__line muted">
+                  Resources managed by it are deleted along with it.
+                </p>
+              )}
+              {kind.resource === 'secrets' && (
+                <p className="confirm-dialog__line muted">
+                  Deleting this Secret can disrupt workloads that mount it.
+                </p>
+              )}
+            </>
+          }
+        />
+      )}
 
       {error && (
         <CallError
