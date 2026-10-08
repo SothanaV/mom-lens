@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KubeApiError } from '@shared/types'
 import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
+import { pushToast } from '@renderer/components/ui/toast'
 import { useLogBuffer } from './useLogBuffer'
 import { usePodContainers } from './usePodContainers'
 import {
@@ -127,9 +128,26 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
   }, [clear])
 
   const onCopy = useCallback((): void => {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(getText()).catch(() => {})
+    // Every clipboard outcome is visible: an empty log copy that silently
+    // "worked" was indistinguishable from one that the OS refused.
+    if (!navigator.clipboard?.writeText) {
+      pushToast({
+        tone: 'error',
+        title: 'Clipboard write failed',
+        message: 'This Electron build exposes no clipboard API.'
+      })
+      return
     }
+    navigator.clipboard
+      .writeText(getText())
+      .then(() => pushToast({ tone: 'success', title: 'Copied' }))
+      .catch((err: unknown) =>
+        pushToast({
+          tone: 'error',
+          title: 'Clipboard write failed',
+          message: err instanceof Error ? err.message : String(err)
+        })
+      )
   }, [getText])
 
   const onDownload = useCallback((): void => {

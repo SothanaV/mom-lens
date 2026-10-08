@@ -36,7 +36,7 @@ or `LOOP.md`, do not commit.
 - [x] USX-01 main: typed k8s errors, stop swallowing failures as empty results (project: soLens) — verify: KUBECONFIG=/home/sothana/Desktop/ssh/mpt/sothanav-local.yaml pnpm test:k8s && pnpm typecheck — covers: UAC1
 - [x] USX-02 renderer: error boundary + styled call-error panels replacing chip banners (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-01 — covers: UAC1
 - [x] USX-03 themed confirm dialog for Delete, namespace echoed, danger styling (project: soLens) — verify: pnpm typecheck && pnpm build — covers: UAC2
-- [ ] USX-04 toast system + feedback for copy/secret-save/context-switch/delete (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-03 — covers: UAC2
+- [x] USX-04 toast system + feedback for copy/secret-save/context-switch/delete (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-03 — covers: UAC2
 - [ ] USX-05 skeleton loading + honest per-cause empty states (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-02 — covers: UAC1
 - [ ] USX-06 apply: optimistic concurrency, honest created/updated/conflict results (project: soLens) — verify: KUBECONFIG=/home/sothana/Desktop/ssh/mpt/sothanav-local.yaml pnpm test:k8s && pnpm typecheck — covers: UAC4
 - [ ] USX-07 write UX: conflict resolution dialog, honest create target namespace, draft-safe close (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-04, USX-06 — covers: UAC3
@@ -55,3 +55,9 @@ or `LOOP.md`, do not commit.
 Feature epics still live in `plan.md` (CRDs, Prometheus, Helm, port-forward, command
 palette, RBAC views, drain/scale/rollout actions). This queue is usability defects only —
 USX-11's row-action slot is the intended insertion point for `plan.md` C2/C3 later.
+
+Follow-ups noted by testers (fold into the nearest touching task):
+- toast.tsx: `if (existing) stopCountdown(id)` before re-arming countdown on a keyed
+  replace (latent stale-timer / hover-pause restart; unreachable today). → USX-07.
+- theme.css: `.toast:hover .toast__message { max-height:none }` un-caps tall error
+  bodies on hover (contrast with the capped-collapse comment nearby). → USX-08.

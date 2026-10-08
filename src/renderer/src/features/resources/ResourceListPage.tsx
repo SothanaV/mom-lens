@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import type { KubeApiError, KubeObject, ListRequest, ResourceEvent } from '@shared/types'
 import { findResourceKind } from '@shared/types'
-import { CallError, CallNotice, toKubeApiError } from '@renderer/components/ui/CallError'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
+import { pushToast } from '@renderer/components/ui/toast'
 import ResourceTable from './ResourceTable'
 import CreateModal from './CreateModal'
 import { objKey, objName, objNamespace, sortItems } from './utils'
@@ -56,7 +57,6 @@ export default function ResourceListPage() {
   const [error, setError] = useState<KubeApiError | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [creating, setCreating] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [pageSize, setPageSize] = useState(50)
   const [continueToken, setContinueToken] = useState<string | undefined>(undefined)
@@ -153,12 +153,6 @@ export default function ResourceListPage() {
     return list
   }, [items, nsSet, query])
 
-  useEffect(() => {
-    if (!notice) return
-    const t = window.setTimeout(() => setNotice(null), 5000)
-    return () => window.clearTimeout(t)
-  }, [notice])
-
   if (!kind) {
     return (
       <div className="page" style={{ padding: 24 }}>
@@ -230,8 +224,6 @@ export default function ResourceListPage() {
         </button>
       </div>
 
-      {notice && <CallNotice text={notice} />}
-
       {error && (
         <CallError
           error={error}
@@ -292,7 +284,12 @@ export default function ResourceListPage() {
           onClose={() => setCreating(false)}
           onSaved={(message) => {
             setCreating(false)
-            setNotice(message)
+            // Toast replaces the inline CallNotice: the modal is the local
+            // confirmation, the toast is the echo that stays after it closes.
+            // The server names what it wrote ("Applied configmaps/foo"), so
+            // that line is the title — no wording invented here (USX-06 makes
+            // it created/updated-honest later).
+            pushToast({ tone: 'success', title: message })
             setReloadKey((k) => k + 1)
           }}
         />

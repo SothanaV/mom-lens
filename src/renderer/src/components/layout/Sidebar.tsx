@@ -3,6 +3,8 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { RESOURCE_CATALOG } from '@shared/types'
 import type { KubeContext, ResourceKind } from '@shared/types'
 import type { ShellStatus } from './AppLayout'
+import { toKubeApiError } from '@renderer/components/ui/CallError'
+import { pushToast } from '@renderer/components/ui/toast'
 import { connectionMeta } from './connection'
 
 interface SidebarProps {
@@ -62,9 +64,24 @@ export default function Sidebar({ shell, onReload }: SidebarProps): React.ReactE
     if (!api?.k8s?.useContext || switching || !name) return
     setSwitching(true)
     try {
-      await api.k8s.useContext(name)
-    } catch {
-      /* surfaced via reload below */
+      const info = await api.k8s.useContext(name)
+      pushToast({ tone: 'success', title: `Connected to ${info.name}` })
+    } catch (err) {
+      // Was `catch {}`: the shell reload below just re-rendered the old state,
+      // so a failed switch looked like a click that did nothing. The sidebar
+      // status line is too easy to miss, so the reason goes out as a toast and
+      // Retry is offered right there.
+      const failure = toKubeApiError(err)
+      // Stable key: a failed RETRY replaces this toast in its slot instead of
+      // stacking a second identical error (repeat failures stay one readable
+      // line; the count never inflates the stack).
+      pushToast({
+        key: `context-switch:${name}`,
+        tone: 'error',
+        title: `Could not switch to ${name}`,
+        message: failure.hint ? `${failure.message} — ${failure.hint}` : failure.message,
+        action: { label: 'Retry', onClick: () => void switchContext(name) }
+      })
     } finally {
       setSwitching(false)
       onReload()

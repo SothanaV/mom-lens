@@ -26,6 +26,14 @@ interface ConfirmDialogProps {
  * absorbs the second click of a double-click that opened the dialog. */
 const BACKDROP_ARM_MS = 300
 
+/** Bookkeeping for one mount of the focus effect (see `focusRunRef`). */
+interface FocusRun {
+  /** Set when a newer effect run supersedes this one: its deferred
+   * focus-restore must then be dropped instead of yanking focus out of a
+   * dialog that is still open. */
+  cancelled: boolean
+}
+
 function focusables(root: HTMLElement): HTMLElement[] {
   return Array.from(
     root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')
@@ -53,6 +61,11 @@ export function ConfirmDialog({
   const cancelRef = useRef<HTMLButtonElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const triggerIdRef = useRef<string>('')
+  /**
+   * The effect run that currently owns focus. A superseded run must not focus
+   * anything from its deferred restore (see the focus effect below).
+   */
+  const focusRunRef = useRef<FocusRun | null>(null)
   const [typed, setTyped] = useState('')
   const [pending, setPending] = useState(false)
   const [backdropArmed, setBackdropArmed] = useState(false)
@@ -66,6 +79,15 @@ export function ConfirmDialog({
   }
 
   useEffect(() => {
+    // StrictMode mounts, runs the effect, cleans it up and runs it again — all
+    // in one synchronous pass, before the frame that the cleanup's rAF lands
+    // on. Run 1's restore would then fire a frame late and yank focus back out
+    // of a dialog run 2 has just opened and still holds. Each run owns a flag
+    // and starting a run cancels the one it supersedes, so only the surviving
+    // run (i.e. a real unmount, where no newer run exists) restores focus.
+    const run: FocusRun = { cancelled: false }
+    if (focusRunRef.current) focusRunRef.current.cancelled = true
+    focusRunRef.current = run
     if (requireTyping !== undefined) inputRef.current?.focus()
     else cancelRef.current?.focus()
     const t = window.setTimeout(() => setBackdropArmed(true), BACKDROP_ARM_MS)
@@ -78,6 +100,7 @@ export function ConfirmDialog({
       // settled and focus() sticks. If navigation already removed it, the
       // lookup finds nothing and we do nothing.
       window.requestAnimationFrame(() => {
+        if (run.cancelled) return
         const opener = document.getElementById(id)
         if (opener && opener.isConnected) opener.focus()
       })

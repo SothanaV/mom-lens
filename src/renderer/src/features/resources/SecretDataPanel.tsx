@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { dump } from 'js-yaml'
 import type { KubeApiError, KubeObject } from '@shared/types'
 import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
+import { pushToast } from '@renderer/components/ui/toast'
 
 interface SecretDataRow {
   id: string
@@ -307,7 +308,28 @@ export default function SecretDataPanel({ obj, onApply }: SecretDataPanelProps) 
                 <button
                   className="btn"
                   type="button"
-                  onClick={() => navigator.clipboard?.writeText(plaintext).catch(() => {})}
+                  onClick={() => {
+                    // Toast on both outcomes — a swallowed clipboard rejection
+                    // read as "it copied".
+                    if (!navigator.clipboard?.writeText) {
+                      pushToast({
+                        tone: 'error',
+                        title: 'Clipboard write failed',
+                        message: 'This Electron build exposes no clipboard API.'
+                      })
+                      return
+                    }
+                    navigator.clipboard
+                      .writeText(plaintext)
+                      .then(() => pushToast({ tone: 'success', title: 'Copied' }))
+                      .catch((err: unknown) =>
+                        pushToast({
+                          tone: 'error',
+                          title: 'Clipboard write failed',
+                          message: err instanceof Error ? err.message : String(err)
+                        })
+                      )
+                  }}
                   title="Copy decoded value"
                 >
                   Copy

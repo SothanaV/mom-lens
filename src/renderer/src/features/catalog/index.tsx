@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ContextInfo, KubeApiError, KubeContext, SoLensApi } from '@shared/types'
 import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
+import { pushToast } from '@renderer/components/ui/toast'
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'error' | 'unavailable'
 
@@ -68,10 +69,22 @@ export default function CatalogPage(): React.ReactElement {
       try {
         const info = await api.k8s.useContext(name)
         setCurrent(info)
+        // Connect succeeded: say so out loud, and keep saying it while the
+        // card grid is still loading (the page right after a connect may still
+        // be fetching, so an inline notice would scroll away mid-wait).
+        pushToast({ tone: 'success', title: `Connected to ${info.name}` })
         navigate('/cluster/overview')
       } catch (err) {
         // useContext keeps rejecting with a bare Error (IPC contract); coerce.
-        setError(toKubeApiError(err))
+        // Inline CallError stays (it carries Retry); the toast is the global
+        // echo — the failure used to be a banner that scrolls out of view.
+        const failure = toKubeApiError(err)
+        setError(failure)
+        pushToast({
+          tone: 'error',
+          title: `Could not connect to ${name}`,
+          message: failure.hint ? `${failure.message} — ${failure.hint}` : failure.message
+        })
       } finally {
         setSwitching(null)
       }

@@ -31,6 +31,7 @@
   --sidebar-width: 244px;
   --topbar-height: 44px;
   --statusbar-height: 26px;
+  --toast-gap: 8px;
   --font-mono: 'Roboto Mono', 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
@@ -1187,4 +1188,141 @@ select option {
 .confirm-dialog__confirm.danger:not(:disabled):hover {
   background: #d94b45;
   border-color: #d94b45;
+}
+
+/* ---------- toasts (ToastRegion) ---------- */
+
+/*
+ * Global feedback stack, bottom-right. Offsets:
+ *   bottom  = --statusbar-height + 10px → never covers the statusbar line
+ *   right   = scrollbar (10px) + 14px   → never covers a vertical scrollbar
+ * Flex-column-REVERSE: `bottom` anchors the FIRST child (the newest toast), so
+ * the stack grows upward and existing toasts keep their slot instead of
+ * jumping. Every line count is clamped (hover-expands are capped too), so the
+ * full 4-stack maxes at ≈530px — under the 560px of space left at the 640px
+ * minimum window height ⇒ the stack can never reach the topbar and its
+ * namespace combobox. `pointer-events: none` (re-enabled on the toasts only)
+ * additionally makes it impossible for the stack to eat a click anywhere.
+ * The region's width is the only width to tune — toasts are stretched
+ * children — and `max-width` keeps a narrow window from overflowing.
+ */
+.toast-region {
+  position: fixed;
+  right: 24px;
+  bottom: calc(var(--statusbar-height) + 10px);
+  z-index: 110;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--toast-gap);
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  /* Only the toasts themselves are clickable (re-enabled below). */
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: toast-in 0.14s ease-out;
+}
+
+/* success / info / error get their tone on the left rail only — the body stays
+ * neutral so a long API message reads like text, not like a banner. */
+.toast--success {
+  border-left-color: var(--success);
+}
+
+.toast--info {
+  border-left-color: var(--info);
+}
+
+.toast--error {
+  border-left-color: var(--danger-strong);
+}
+
+.toast__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast__title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  /* Bounded even against a pathological one-character-per-line identifier. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.toast--error .toast__title {
+  color: var(--danger);
+}
+
+.toast__message {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  height: auto;
+  /* Bounding the four-toast stack: a long failure message clamps. */
+  max-height: calc(4.5em + 6px);
+  overflow: hidden;
+}
+
+.toast__action,
+.toast__dismiss {
+  flex: none;
+}
+
+/* Bare × : the existing idiom for quiet dismiss controls (list/search clear). */
+.toast__dismiss {
+  padding: 0 3px;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.toast__dismiss:hover {
+  color: var(--text);
+}
+
+/* Nudging a toast means reading it: the clipped failure detail expands on
+ * hover instead of being cut off (auto-dismiss is paused at the same time —
+ * see pauseToast). */
+.toast:hover .toast__message {
+  max-height: none;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
 }

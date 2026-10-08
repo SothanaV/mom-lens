@@ -4,12 +4,13 @@ status: running
 started: 2026-10-08T00:00
 maxTasks: 12
 maxRetries: 2
-taskBudgetRemaining: 9
+taskBudgetRemaining: 8
 
 ## Done
 - USX-01 — 2026-10-08 (typed in-band kube errors; rejected once on the array-hybrid envelope that silently drops `error` across IPC, fixed + gated). `git log --grep 'Loop-Task: USX-01'`
 - USX-02 — 2026-10-08 (error boundary + errorElement/NotFound + CallError/CallNotice panels; rejected once on an AI-composer draft-loss regression, fixed + gated). `git log --grep 'Loop-Task: USX-02'`
 - USX-03 — 2026-10-08 (ConfirmDialog replacing window.confirm; passed first gate. Dev-StrictMode focus-restore quirk deferred to USX-04 per tester note). `git log --grep 'Loop-Task: USX-03'`
+- USX-04 — 2026-10-08 (toast system: 8 wired sites, keyed replace-in-place, hover-pause; rejected once on the undefined --toast-gap token + duplicate stack on retry, fixed + gated). `git log --grep 'Loop-Task: USX-04'`
 
 ## Skipped
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import type { ContextInfo } from '@shared/types'
 import ErrorBoundary from '@renderer/components/ui/ErrorBoundary'
+import { ToastRegion } from '@renderer/components/ui/toast'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import type { ConnectionStatus } from './connection'
@@ -76,6 +77,10 @@ export default function AppLayout(): React.ReactElement {
           </ErrorBoundary>
         </main>
       </div>
+      {/* One global stack for the whole shell (USX-04): toasts are queued in a
+          module store, so a page unmounting mid-flight cannot take its own
+          confirmation down with it. */}
+      <ToastRegion />
     </div>
   )
 }

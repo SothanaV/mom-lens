@@ -4,8 +4,9 @@ import { dump } from 'js-yaml'
 import type { KubeApiError, KubeObject, NodeMetrics, PodMetrics, ResourceKind } from '@shared/types'
 import { findResourceKind } from '@shared/types'
 import { PodLogs, PodTerminal } from '@renderer/features/devtools'
-import { CallError, CallNotice, toKubeApiError } from '@renderer/components/ui/CallError'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 import { ConfirmDialog } from '@renderer/components/ui/ConfirmDialog'
+import { pushToast } from '@renderer/components/ui/toast'
 import YamlView from './YamlView'
 import YamlEditor from './YamlEditor'
 import SecretDataPanel from './SecretDataPanel'
@@ -187,7 +188,6 @@ export default function ResourceDetailPage() {
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [yamlVisible, setYamlVisible] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
   const [podMetrics, setPodMetrics] = useState<PodMetrics | null>(null)
   const [nodeMetrics, setNodeMetrics] = useState<NodeMetrics | null>(null)
   // Why metrics are missing here: null=none/absent, otherwise the typed failure.
@@ -270,17 +270,10 @@ export default function ResourceDetailPage() {
     }
   }, [kind, namespace, name])
 
-  useEffect(() => {
-    if (!notice) return
-    const t = window.setTimeout(() => setNotice(null), 5000)
-    return () => window.clearTimeout(t)
-  }, [notice])
-
   const startEdit = useCallback((): void => {
     if (!obj) return
     setDraft(cleanForApply(obj))
     setError(null)
-    setNotice(null)
     setEditing(true)
   }, [obj])
 
@@ -299,7 +292,9 @@ export default function ResourceDetailPage() {
       }
       setEditing(false)
       setSaving(false)
-      setNotice(res.message ?? 'Applied.')
+      // Toast replaces the inline CallNotice: on this page a success notice
+      // scrolled out of sight under the long YAML/logs sections.
+      pushToast({ tone: 'success', title: 'Applied', message: res.message })
       setReloadKey((k) => k + 1)
     } catch (err) {
       setError(toKubeApiError(err))
@@ -327,6 +322,10 @@ export default function ResourceDetailPage() {
       return
     }
     setConfirmOpen(false)
+    // Queue it BEFORE navigating: the toast store is module-level and the
+    // region is hosted by AppLayout, so it survives this page's unmount and
+    // announces the delete on the list page (the old flow just navigated away).
+    pushToast({ tone: 'success', title: `Deleted ${kind.kind} ${name}` })
     navigate(listPath(kind.resource, searchParams.get('ns')))
   }, [kind, name, namespace, deleting, navigate, searchParams])
 
@@ -337,7 +336,9 @@ export default function ResourceDetailPage() {
       // Keep the typed failure: SecretDataPanel renders it through CallError.
       throw res.error ?? { code: 'unknown', message: res.message ?? 'Apply failed.' }
     }
-    setNotice(res.message ?? 'Applied.')
+    // Toast, not the old inline notice: the Data section sits below the fold
+    // on most Secrets, so the save confirmation was never seen.
+    pushToast({ tone: 'success', title: 'Secret saved', message: res.message })
     setReloadKey((k) => k + 1)
   }, [])
 
@@ -407,8 +408,6 @@ export default function ResourceDetailPage() {
           {deleting ? 'Deleting…' : 'Delete'}
         </button>
       </div>
-
-      {notice && <CallNotice text={notice} />}
 
       {confirmOpen && obj && (
         <ConfirmDialog
