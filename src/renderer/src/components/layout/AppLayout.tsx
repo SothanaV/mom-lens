@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import type { ContextInfo } from '@shared/types'
+import ErrorBoundary from '@renderer/components/ui/ErrorBoundary'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import type { ConnectionStatus } from './connection'
@@ -16,6 +17,7 @@ function getApi(): typeof window.api | undefined {
 }
 
 export default function AppLayout(): React.ReactElement {
+  const location = useLocation()
   const [shell, setShell] = useState<ShellStatus>({ context: null, status: 'loading', error: null })
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -60,7 +62,18 @@ export default function AppLayout(): React.ReactElement {
       <div className="app-main">
         <TopBar shell={shell} />
         <main className="app-content">
-          <Outlet />
+          {/*
+           * B1: only the routed content is guarded, so the sidebar/topbar stay
+           * usable when a page throws.
+           * B1 auto-reset: `resetKey` is the router location (pathname + key —
+           * `key` changes on every navigation, including a push to the same
+           * URL). The boundary clears its captured error whenever it changes,
+           * so navigating away/back (or clicking the same sidebar item again)
+           * always retries the page instead of sticking on the panel.
+           */}
+          <ErrorBoundary resetKey={`${location.pathname}|${location.key}`}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

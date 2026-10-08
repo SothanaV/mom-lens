@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { dump } from 'js-yaml'
-import type { KubeObject, NodeMetrics, PodMetrics, ResourceKind } from '@shared/types'
+import type { KubeApiError, KubeObject, NodeMetrics, PodMetrics, ResourceKind } from '@shared/types'
 import { findResourceKind } from '@shared/types'
 import { PodLogs, PodTerminal } from '@renderer/features/devtools'
+import { CallError, CallNotice, toKubeApiError } from '@renderer/components/ui/CallError'
 import YamlView from './YamlView'
 import YamlEditor from './YamlEditor'
 import SecretDataPanel from './SecretDataPanel'
@@ -163,7 +164,7 @@ export default function ResourceDetailPage() {
 
   const [obj, setObj] = useState<KubeObject | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [editing, setEditing] = useState(false)
@@ -173,8 +174,8 @@ export default function ResourceDetailPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [podMetrics, setPodMetrics] = useState<PodMetrics | null>(null)
   const [nodeMetrics, setNodeMetrics] = useState<NodeMetrics | null>(null)
-  // Why metrics are missing here: null=none/absent, otherwise the failure text.
-  const [metricsNote, setMetricsNote] = useState<string | null>(null)
+  // Why metrics are missing here: null=none/absent, otherwise the typed failure.
+  const [metricsNote, setMetricsNote] = useState<KubeApiError | null>(null)
 
   useEffect(() => {
     if (!kind || !name || !window.api) return
@@ -187,7 +188,7 @@ export default function ResourceDetailPage() {
         if (cancelled) return
         // In-band failure: never render an error result as if it were an object.
         if (o.error) {
-          setError(o.error.hint ? `${o.error.message} — ${o.error.hint}` : o.error.message)
+          setError(o.error)
         } else {
           setObj(o)
         }
@@ -195,7 +196,7 @@ export default function ResourceDetailPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
+        setError(toKubeApiError(err))
         setLoading(false)
       })
     return () => {
@@ -221,12 +222,12 @@ export default function ResourceDetailPage() {
             )
             // Absent metrics-server (notFound) reads as plain "no data";
             // any other failure states its real reason instead.
-            setMetricsNote(res.error && res.error.code !== 'notFound' ? res.error.message : null)
+            setMetricsNote(res.error && res.error.code !== 'notFound' ? res.error : null)
           })
-          .catch(() => {
+          .catch((err: unknown) => {
             if (!cancelled) {
               setPodMetrics(null)
-              setMetricsNote('metrics request failed')
+              setMetricsNote(toKubeApiError(err))
             }
           })
       } else {
@@ -235,12 +236,12 @@ export default function ResourceDetailPage() {
           .then((res) => {
             if (cancelled) return
             setNodeMetrics(res.items.find((m) => m.name === name) ?? null)
-            setMetricsNote(res.error && res.error.code !== 'notFound' ? res.error.message : null)
+            setMetricsNote(res.error && res.error.code !== 'notFound' ? res.error : null)
           })
-          .catch(() => {
+          .catch((err: unknown) => {
             if (!cancelled) {
               setNodeMetrics(null)
-              setMetricsNote('metrics request failed')
+              setMetricsNote(toKubeApiError(err))
             }
           })
       }
@@ -274,7 +275,9 @@ export default function ResourceDetailPage() {
     try {
       const res = await window.api.k8s.applyYaml(draft)
       if (!res.ok) {
-        setError(res.message ?? 'Apply failed.')
+        setError(
+          res.error ?? { code: 'unknown', message: res.message ?? 'Apply failed.' }
+        )
         setSaving(false)
         return
       }
@@ -283,7 +286,7 @@ export default function ResourceDetailPage() {
       setNotice(res.message ?? 'Applied.')
       setReloadKey((k) => k + 1)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(toKubeApiError(err))
       setSaving(false)
     }
   }, [kind, name, saving, draft])
@@ -295,12 +298,14 @@ export default function ResourceDetailPage() {
     try {
       const res = await window.api.k8s.deleteResource({ scope: kind, namespace, name })
       if (!res.ok) {
-        setError(res.message ?? 'Delete failed')
+        setError(
+          res.error ?? { code: 'unknown', message: res.message ?? 'Delete failed.' }
+        )
         setDeleting(false)
         return
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(toKubeApiError(err))
       setDeleting(false)
       return
     }
@@ -310,7 +315,10 @@ export default function ResourceDetailPage() {
   const applySecretDoc = useCallback(async (text: string): Promise<void> => {
     if (!window.api) return
     const res = await window.api.k8s.applyYaml(text)
-    if (!res.ok) throw new Error(res.message ?? 'Apply failed')
+    if (!res.ok) {
+      // Keep the typed failure: SecretDataPanel renders it through CallError.
+      throw res.error ?? { code: 'unknown', message: res.message ?? 'Apply failed.' }
+    }
     setNotice(res.message ?? 'Applied.')
     setReloadKey((k) => k + 1)
   }, [])
@@ -375,16 +383,16 @@ export default function ResourceDetailPage() {
         </button>
       </div>
 
-      {notice && (
-        <div className="chip" style={{ color: '#3fb950', whiteSpace: 'pre-wrap' }}>
-          {notice}
-        </div>
-      )}
+      {notice && <CallNotice text={notice} />}
 
       {error && (
-        <div className="chip" style={{ color: '#e5534b', whiteSpace: 'pre-wrap' }}>
-          Error: {error}
-        </div>
+        <CallError
+          error={error}
+          onRetry={() => {
+            setError(null)
+            setReloadKey((k) => k + 1)
+          }}
+        />
       )}
 
       {loading && !obj ? (
@@ -427,8 +435,8 @@ export default function ResourceDetailPage() {
             <section>
               <h3>Metrics</h3>
               {metricsNote && (
-                <div className="chip mono" style={{ color: '#e5534b', marginBottom: 8 }}>
-                  {metricsNote}
+                <div style={{ marginBottom: 8 }}>
+                  <CallError compact error={metricsNote} />
                 </div>
               )}
               <table className="table">
@@ -450,8 +458,8 @@ export default function ResourceDetailPage() {
             <section>
               <h3>Metrics</h3>
               {metricsNote && (
-                <div className="chip mono" style={{ color: '#e5534b', marginBottom: 8 }}>
-                  {metricsNote}
+                <div style={{ marginBottom: 8 }}>
+                  <CallError compact error={metricsNote} />
                 </div>
               )}
               <table className="table">

@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { AiInfo } from '@shared/types'
+import type { AiInfo, KubeApiError } from '@shared/types'
+import { CallError } from '@renderer/components/ui/CallError'
 
 interface Msg {
   role: 'user' | 'assistant'
   content: string
+  /** Failure of this turn; rendered as its own error block inside the bubble. */
+  error?: KubeApiError
+  /** Prompt of a failed send, kept so the error block's Retry can re-run it. */
+  retryPrompt?: string
 }
 
 export default function AIPage(): React.ReactElement {
@@ -79,12 +84,23 @@ export default function AIPage(): React.ReactElement {
       streamIdRef.current = null
       setStreaming(false)
       if (e.error) {
+        const raw = e.error
         setMessages((prev) => {
           if (prev.length === 0) return prev
-          const last = prev[prev.length - 1]
-          const note = `\n\n[error] ${e.error}`
           const next = prev.slice(0, -1)
-          next.push({ ...last, content: `${last.content}${note}` })
+          const last = prev[prev.length - 1]
+          // Typed-ish failure: the ai sub-protocol only carries a message, so
+          // classify the handful of real runner states into KubeApiError codes
+          // and render it as its own CallError block in/next to the bubble.
+          const lower = raw.toLowerCase()
+          const code = lower.includes('not found')
+            ? ('notFound' as const)
+            : lower.includes('forbidden') || lower.includes('permission')
+              ? ('forbidden' as const)
+              : lower.includes('timed out') || lower.includes('timeout')
+                ? ('timeout' as const)
+                : ('unknown' as const)
+          next.push({ ...last, error: { code, message: raw } })
           return next
         })
       }
@@ -119,35 +135,49 @@ export default function AIPage(): React.ReactElement {
 
   const disabledSend = !hasApi || streaming || (!!info && info.available === false)
 
+  // Run a prompt through opencode; shared by the composer Send and the
+  // in-bubble error Retry.
+  const startRun = useCallback(
+    async (prompt: string): Promise<void> => {
+      if (!ai || !prompt || streaming) return
+      const id = crypto.randomUUID()
+      streamIdRef.current = id
+      setStreaming(true)
+      setMessages((prev) => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', retryPrompt: prompt }])
+      try {
+        await ai.start(id, {
+          prompt,
+          model: model.trim() || undefined,
+          agent: agent.trim() || undefined,
+          session: sessionRef.current || undefined
+        })
+      } catch (err) {
+        streamIdRef.current = null
+        setStreaming(false)
+        setMessages((prev) => {
+          if (prev.length === 0) return prev
+          const next = prev.slice(0, -1)
+          const last = prev[prev.length - 1]
+          // Distinct error state on the bubble (was: "[error] …" appended to
+          // the answer text).
+          next.push({ ...last, error: { code: 'unknown', message: String(err instanceof Error ? err.message : err) } })
+          return next
+        })
+      }
+    },
+    [ai, streaming, model, agent]
+  )
+
   const send = useCallback(async (): Promise<void> => {
+    // Guards stay local to send (HEAD shape): Enter is wired here even while
+    // streaming and the textarea is not disabled during a run, so checking
+    // AFTER setInput('') would swallow the draft. startRun re-checks these.
     if (!ai) return
     const prompt = input.trim()
     if (!prompt || streaming) return
-    const id = crypto.randomUUID()
-    streamIdRef.current = id
-    setStreaming(true)
-    setMessages((prev) => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '' }])
     setInput('')
-    try {
-      await ai.start(id, {
-        prompt,
-        model: model.trim() || undefined,
-        agent: agent.trim() || undefined,
-        session: sessionRef.current || undefined
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      streamIdRef.current = null
-      setStreaming(false)
-      setMessages((prev) => {
-        if (prev.length === 0) return prev
-        const next = prev.slice(0, -1)
-        const last = prev[prev.length - 1]
-        next.push({ ...last, content: `${last.content}\n\n[error] ${message}` })
-        return next
-      })
-    }
-  }, [ai, input, streaming, model, agent])
+    await startRun(prompt)
+  }, [ai, input, streaming, startRun])
 
   const stop = useCallback((): void => {
     const id = streamIdRef.current
@@ -229,7 +259,19 @@ export default function AIPage(): React.ReactElement {
             <span className="mono">opencode</span> runner.
           </div>
         ) : (
-          messages.map((m, i) => <MessageRow key={i} msg={m} streaming={streaming && i === messages.length - 1} />)
+          messages.map((m, i) => (
+            <MessageRow
+              key={i}
+              msg={m}
+              streaming={streaming && i === messages.length - 1}
+              // Retry resends the failed turn's own prompt (never the composer
+              // draft) and is withheld while a run is streaming; startRun
+              // re-checks the guard independently.
+              onRetry={
+                m.retryPrompt && !streaming ? () => void startRun(m.retryPrompt ?? '') : undefined
+              }
+            />
+          ))
         )}
       </div>
 
@@ -296,12 +338,20 @@ export default function AIPage(): React.ReactElement {
   )
 }
 
-function MessageRow({ msg, streaming }: { msg: Msg; streaming: boolean }): React.ReactElement {
+function MessageRow({
+  msg,
+  streaming,
+  onRetry
+}: {
+  msg: Msg
+  streaming: boolean
+  onRetry?: () => void
+}): React.ReactElement {
   const isUser = msg.role === 'user'
   return (
     <div
       style={{
-        borderLeft: `2px solid ${isUser ? 'var(--accent)' : 'var(--success)'}`,
+        borderLeft: `2px solid ${msg.error ? 'var(--danger)' : isUser ? 'var(--accent)' : 'var(--success)'}`,
         padding: '2px 0 2px 12px',
         marginBottom: 14
       }}
@@ -322,6 +372,11 @@ function MessageRow({ msg, streaming }: { msg: Msg; streaming: boolean }): React
         {msg.content}
         {!isUser && streaming && !msg.content ? <span className="spin">…</span> : null}
       </div>
+      {msg.error ? (
+        <div className="ai-message__error">
+          <CallError compact error={msg.error} onRetry={onRetry} />
+        </div>
+      ) : null}
     </div>
   )
 }

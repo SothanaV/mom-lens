@@ -34,7 +34,7 @@ or `LOOP.md`, do not commit.
 ## Queue
 
 - [x] USX-01 main: typed k8s errors, stop swallowing failures as empty results (project: soLens) — verify: KUBECONFIG=/home/sothana/Desktop/ssh/mpt/sothanav-local.yaml pnpm test:k8s && pnpm typecheck — covers: UAC1
-- [ ] USX-02 renderer: error boundary + styled call-error panels replacing chip banners (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-01 — covers: UAC1
+- [x] USX-02 renderer: error boundary + styled call-error panels replacing chip banners (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-01 — covers: UAC1
 - [ ] USX-03 themed confirm dialog for Delete, namespace echoed, danger styling (project: soLens) — verify: pnpm typecheck && pnpm build — covers: UAC2
 - [ ] USX-04 toast system + feedback for copy/secret-save/context-switch/delete (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-03 — covers: UAC2
 - [ ] USX-05 skeleton loading + honest per-cause empty states (project: soLens) — verify: pnpm typecheck && pnpm build — depends: USX-02 — covers: UAC1

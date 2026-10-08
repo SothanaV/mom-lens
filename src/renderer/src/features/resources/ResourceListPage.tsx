@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import type { KubeObject, ListRequest, ResourceEvent } from '@shared/types'
+import type { KubeApiError, KubeObject, ListRequest, ResourceEvent } from '@shared/types'
 import { findResourceKind } from '@shared/types'
+import { CallError, CallNotice, toKubeApiError } from '@renderer/components/ui/CallError'
 import ResourceTable from './ResourceTable'
 import CreateModal from './CreateModal'
 import { objKey, objName, objNamespace, sortItems } from './utils'
@@ -52,7 +53,7 @@ export default function ResourceListPage() {
 
   const [items, setItems] = useState<KubeObject[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -60,6 +61,9 @@ export default function ResourceListPage() {
   const [pageSize, setPageSize] = useState(50)
   const [continueToken, setContinueToken] = useState<string | undefined>(undefined)
   const [loadingMore, setLoadingMore] = useState(false)
+  // Separate slot for a failed "Load more": the already-listed items stay, so
+  // this must not reuse (or hide) the top page-level error panel.
+  const [moreError, setMoreError] = useState<KubeApiError | null>(null)
 
   // First page (and resets) go through the paged API so the API server only
   // serializes one page at a time.
@@ -68,6 +72,7 @@ export default function ResourceListPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setMoreError(null)
     setContinueToken(undefined)
     window.api.k8s
       .listResourcesPage({ ...req, limit: pageSize })
@@ -75,7 +80,7 @@ export default function ResourceListPage() {
         if (cancelled) return
         // In-band failure: a 403/404 never arrives as an empty page again.
         if (page.error) {
-          setError(page.error.hint ? `${page.error.message} — ${page.error.hint}` : page.error.message)
+          setError(page.error)
         } else {
           setError(null)
           setItems(sortItems(page.items, showNamespace))
@@ -85,7 +90,7 @@ export default function ResourceListPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
+        setError(toKubeApiError(err))
         setLoading(false)
       })
     return () => {
@@ -96,7 +101,7 @@ export default function ResourceListPage() {
   const loadMore = async (): Promise<void> => {
     if (!req || !window.api || !continueToken || loadingMore) return
     setLoadingMore(true)
-    setError(null)
+    setMoreError(null)
     try {
       const page = await window.api.k8s.listResourcesPage({
         ...req,
@@ -104,7 +109,7 @@ export default function ResourceListPage() {
         continueToken
       })
       if (page.error) {
-        setError(page.error.hint ? `${page.error.message} — ${page.error.hint}` : page.error.message)
+        setMoreError(page.error)
         return
       }
       setItems((prev) => {
@@ -114,7 +119,7 @@ export default function ResourceListPage() {
       })
       setContinueToken(page.continueToken)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setMoreError(toKubeApiError(err))
     } finally {
       setLoadingMore(false)
     }
@@ -225,22 +230,25 @@ export default function ResourceListPage() {
         </button>
       </div>
 
-      {notice && (
-        <div className="chip" style={{ color: '#3fb950', whiteSpace: 'pre-wrap' }}>
-          {notice}
-        </div>
-      )}
+      {notice && <CallNotice text={notice} />}
 
       {error && (
-        <div className="chip" style={{ color: '#e5534b', whiteSpace: 'pre-wrap' }}>
-          Error: {error}
-        </div>
+        <CallError
+          error={error}
+          onRetry={() => {
+            setError(null)
+            setReloadKey((k) => k + 1)
+          }}
+        />
       )}
 
       {loading && items.length === 0 ? (
         <div>Loading {kind.kind.toLowerCase()}…</div>
       ) : error && visibleItems.length === 0 ? (
-        <div>Could not load {kind.resource}. Check that the cluster is reachable and your context has access.</div>
+        <div style={{ opacity: 0.7 }}>
+          Could not load {kind.resource}. Check that the cluster is reachable and your context
+          has access.
+        </div>
       ) : items.length === 0 ? (
         <div>No {kind.resource} found{kind.namespaced && !allNamespaces ? ` in ${nsLabel}` : ''}.</div>
       ) : visibleItems.length === 0 ? (
@@ -264,13 +272,16 @@ export default function ResourceListPage() {
       )}
 
       {!loading && continueToken && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4 }}>
-          <button className="btn" type="button" disabled={loadingMore} onClick={() => void loadMore()}>
-            {loadingMore ? 'Loading…' : `Load ${pageSize} more`}
-          </button>
-          <span style={{ opacity: 0.7, fontSize: 12 }}>
-            {items.length} loaded — more pages available on the server
-          </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="btn" type="button" disabled={loadingMore} onClick={() => void loadMore()}>
+              {loadingMore ? 'Loading…' : `Load ${pageSize} more`}
+            </button>
+            <span style={{ opacity: 0.7, fontSize: 12 }}>
+              {items.length} loaded — more pages available on the server
+            </span>
+          </div>
+          {moreError && <CallError compact error={moreError} onRetry={() => void loadMore()} />}
         </div>
       )}
 

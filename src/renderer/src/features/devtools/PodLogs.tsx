@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { KubeApiError } from '@shared/types'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 import { useLogBuffer } from './useLogBuffer'
 import { usePodContainers } from './usePodContainers'
 import {
@@ -27,12 +29,14 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
   const [wrap, setWrap] = useState(false)
   const [previous, setPrevious] = useState(false)
   const [timestamps, setTimestamps] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [regex, setRegex] = useState(false)
   const preRef = useRef<HTMLPreElement | null>(null)
   const stickRef = useRef(true)
+  // Bump to restart the whole stream (used by the CallError Retry button).
+  const [streamKey, setStreamKey] = useState(0)
 
   // null = default/auto; explicit selection wins once chosen.
   const activeContainer = container ?? containers[0] ?? null
@@ -49,7 +53,17 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
       if (e.id === id) append(e.chunk)
     })
     const offErr = api.events.onLogsError((e) => {
-      if (e.id === id) setError(e.message)
+      if (e.id === id) {
+        // Stream-level failures carry a message only; the sub-protocol is
+        // fixed by the IPC contract, so classify the common cases here.
+        const lower = e.message.toLowerCase()
+        const code = lower.includes('not found')
+          ? ('notFound' as const)
+          : lower.includes('forbidden') || lower.includes('cannot get')
+            ? ('forbidden' as const)
+            : ('unknown' as const)
+        setError({ code, message: e.message })
+      }
     })
 
     api.k8s
@@ -62,14 +76,14 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
         timestamps,
         previous
       })
-      .catch((err: unknown) => setError(String(err)))
+      .catch((err: unknown) => setError(toKubeApiError(err)))
 
     return () => {
       offData()
       offErr()
       api.k8s.logsStop(id).catch(() => {})
     }
-  }, [api, loaded, namespace, podName, activeContainer, follow, timestamps, previous, append, clear])
+  }, [api, loaded, namespace, podName, activeContainer, follow, timestamps, previous, append, clear, streamKey])
 
   // Log search: build the active matcher; invalid regex stays visible but disables filtering.
   const { matcher, regexError } = useMemo((): { matcher: RegExp | null; regexError: string | null } => {
@@ -238,19 +252,14 @@ export function PodLogs({ namespace, podName }: PodLogsProps) {
       ) : null}
 
       {error ? (
-        <div
-          className="mono"
-          style={{
-            padding: '6px 10px',
-            borderBottom: `1px solid ${palette.border}`,
-            color: '#e06c75',
-            background: 'rgba(224,108,117,0.08)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-            fontSize: 12
-          }}
-        >
-          {error}
+        <div style={{ padding: '6px 10px', borderBottom: `1px solid ${palette.border}` }}>
+          {/* Inline inside the terminal frame (allowed for devtools widgets);
+              compact so the log area keeps the space. */}
+          <CallError
+            compact
+            error={error}
+            onRetry={() => setStreamKey((k) => k + 1)}
+          />
         </div>
       ) : null}
 

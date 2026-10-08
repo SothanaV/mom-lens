@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { KubeApiError } from '@shared/types'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 
 interface NamespaceSelectProps {
   value: string
@@ -65,7 +67,7 @@ export default function NamespaceSelect({
   const [query, setQuery] = useState('')
   const [names, setNames] = useState<string[]>(() => (cachedKey === contextKey ? cachedNames : []))
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
   const [highlight, setHighlight] = useState(0)
 
   useEffect(() => {
@@ -85,7 +87,11 @@ export default function NamespaceSelect({
     }
     const api = getApi()
     if (!api?.k8s?.listNamespaces) {
-      setError('Namespace API unavailable')
+      setError({
+        code: 'unreachable',
+        message: 'Namespace API unavailable',
+        hint: 'mom-lens must run inside the Electron app.'
+      })
       return
     }
     setLoading(true)
@@ -93,7 +99,7 @@ export default function NamespaceSelect({
     try {
       const res = await api.k8s.listNamespaces()
       if (res.error) {
-        setError(res.error.message)
+        setError(res.error)
         return
       }
       const list = res.items
@@ -104,7 +110,7 @@ export default function NamespaceSelect({
       cachedNames = list
       setNames(list)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(toKubeApiError(err))
     } finally {
       setLoading(false)
     }
@@ -247,7 +253,22 @@ export default function NamespaceSelect({
             aria-label="Namespaces"
           >
             {loading && <div className="combo-status">Loading namespaces…</div>}
-            {!loading && error && <div className="combo-status combo-status--error">{error}</div>}
+            {!loading && error && (
+              // Compact inside the popover body; retry re-runs the list call
+              // (a persistent failure means the options list below stays empty,
+              // so the message must fully replace, not overlay, the options).
+              <div className="combo-status combo-status--error">
+                <CallError
+                  compact
+                  error={error}
+                  onRetry={() => {
+                    setError(null)
+                    setNames([])
+                    void load()
+                  }}
+                />
+              </div>
+            )}
             {!loading && !error && options.length <= 1 && (
               <div className="combo-status">
                 {query.trim() ? 'No matching namespaces' : 'No namespaces found'}

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { dump } from 'js-yaml'
-import type { KubeObject } from '@shared/types'
+import type { KubeApiError, KubeObject } from '@shared/types'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 
 interface SecretDataRow {
   id: string
@@ -107,7 +108,7 @@ export default function SecretDataPanel({ obj, onApply }: SecretDataPanelProps) 
   const [editing, setEditing] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
 
   const patch = (id: string, changes: Partial<SecretDataRow>, markDirty = true): void => {
     if (markDirty) setDirty(true)
@@ -163,12 +164,12 @@ export default function SecretDataPanel({ obj, onApply }: SecretDataPanelProps) 
     setError(null)
     const kept = rows.filter((r) => !r.removed)
     if (kept.some((r) => !r.key.trim())) {
-      setError('Every key needs a name (or remove the row).')
+      setError({ code: 'invalid', message: 'Every key needs a name (or remove the row).' })
       return
     }
     const names = kept.map((r) => r.key.trim())
     if (new Set(names).size !== names.length) {
-      setError('Duplicate keys are not allowed.')
+      setError({ code: 'invalid', message: 'Duplicate keys are not allowed.' })
       return
     }
 
@@ -196,7 +197,8 @@ export default function SecretDataPanel({ obj, onApply }: SecretDataPanelProps) 
       setDirty(false)
       setRevealed(new Set())
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      // applySecretDoc re-throws the typed KubeApiError; anything else is coerced.
+      setError(toKubeApiError(err))
     } finally {
       setSaving(false)
     }
@@ -338,11 +340,9 @@ export default function SecretDataPanel({ obj, onApply }: SecretDataPanelProps) 
           ))}
         </div>
       )}
-      {error && (
-        <div className="mono" style={{ color: '#e5534b', fontSize: 12, whiteSpace: 'pre-wrap' }}>
-          {error}
-        </div>
-      )}
+      {/* No retry button here: on failure the panel stays in edit mode with
+          its Save button, which *is* the retry. */}
+      {error && <CallError compact error={error} />}
       <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
         {editing ? (
           <>

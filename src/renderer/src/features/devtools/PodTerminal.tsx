@@ -4,6 +4,7 @@ import type { ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { usePodContainers } from './usePodContainers'
+import { errorTitle, toKubeApiError } from '@renderer/components/ui/CallError'
 import { barStyle, panelStyle, palette, selectStyle } from './theme'
 
 interface PodTerminalProps {
@@ -111,7 +112,12 @@ export function PodTerminal({ namespace, podName }: PodTerminalProps) {
         command,
         tty: true
       })
-      .catch(() => term.write('\r\n\x1b[31m[failed to start exec session]\x1b[0m\r\n'))
+      .catch((err: unknown) => {
+        // Typed title from the error code, written inside the terminal frame
+        // (xterm owns this region; a DOM CallError would fight the fit addon).
+        const e = toKubeApiError(err)
+        term.write(`\r\n\x1b[31m[${errorTitle(e.code)}] ${e.message}\x1b[0m\r\n`)
+      })
 
     term.focus()
 

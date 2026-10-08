@@ -952,3 +952,125 @@ select option {
   background: #26292b;
   color: var(--text);
 }
+
+/* ---------- call errors / notices / crash panels ---------- */
+
+/*
+ * Error & notice presentation layer. NEVER reuse `.chip` for these: the chip
+ * is an 18px uppercase pill and clips any real k8s message to nothing.
+ */
+.call-error {
+  border: 1px solid rgba(206, 57, 51, 0.45);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: rgba(206, 57, 51, 0.08);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.call-error__title {
+  color: #ef7169;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 3px;
+}
+
+.call-error__message {
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.call-error__hint {
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.call-error__actions {
+  margin-top: 8px;
+}
+
+/* Dense variant: popovers, in-bubble notices (still multi-line safe). */
+.call-error--compact {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.call-error--compact .call-error__title {
+  font-size: 12px;
+}
+
+.call-error--compact .call-error__actions {
+  margin-top: 6px;
+}
+
+/* Success/confirmation notice — the styled counterpart of .call-error. */
+.call-notice {
+  border: 1px solid rgba(87, 185, 138, 0.35);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius);
+  background: rgba(76, 175, 80, 0.08);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Crash / route-failure panel (ErrorBoundary, errorElement, 404 view). */
+.error-panel {
+  max-width: 640px;
+  margin: 24px auto;
+  padding: 22px 26px;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--danger-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+}
+
+.error-panel h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.error-panel__lead {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.error-panel__detail {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: #ef7169;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.error-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* In-bubble AI failure: distinct from streamed answer text. */
+.ai-message__error {
+  margin-top: 8px;
+}

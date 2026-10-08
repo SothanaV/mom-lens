@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { ContextInfo, KubeContext, SoLensApi } from '@shared/types'
+import type { ContextInfo, KubeApiError, KubeContext, SoLensApi } from '@shared/types'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'error' | 'unavailable'
 
@@ -13,7 +14,7 @@ export default function CatalogPage(): React.ReactElement {
   const api: SoLensApi | undefined = window.api
 
   const [state, setState] = useState<LoadState>('loading')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
   const [contexts, setContexts] = useState<KubeContext[]>([])
   const [current, setCurrent] = useState<ContextInfo | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
@@ -39,13 +40,18 @@ export default function CatalogPage(): React.ReactElement {
       setCurrent(cur?.context ?? null)
       if (ctxRes.value.error) {
         // kubeconfig failed to load: list is empty but the reason is real
-        setError(ctxRes.value.error.message)
+        setError(ctxRes.value.error)
         setState('error')
         return
       }
+      if (cur?.error) {
+        // Contexts read fine but the *current context* probe failed (e.g. bad
+        // kubeconfig context): surface it instead of showing "Not connected".
+        setError(cur.error)
+      }
       setState(list.length === 0 ? 'empty' : 'ready')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(toKubeApiError(err))
       setState('error')
     }
   }, [api])
@@ -64,7 +70,8 @@ export default function CatalogPage(): React.ReactElement {
         setCurrent(info)
         navigate('/cluster/overview')
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        // useContext keeps rejecting with a bare Error (IPC contract); coerce.
+        setError(toKubeApiError(err))
       } finally {
         setSwitching(null)
       }
@@ -100,8 +107,8 @@ export default function CatalogPage(): React.ReactElement {
       )}
 
       {error && (
-        <div style={{ marginBottom: 16, padding: 10, borderRadius: 6, border: '1px solid #e5534b55', background: '#e5534b18', color: '#e5534b' }}>
-          {error}
+        <div style={{ marginBottom: 16 }}>
+          <CallError error={error} onRetry={() => void load()} />
         </div>
       )}
 

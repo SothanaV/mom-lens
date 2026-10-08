@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom'
 import { apiVersionOf, findResourceKind } from '@shared/types'
 import type {
   ContextInfo,
+  KubeApiError,
   KubeObject,
   NodeMetrics,
   PodMetrics,
   ResourceKind,
   SoLensApi
 } from '@shared/types'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 
 interface NodeStatusView {
   conditions?: { type?: string; status?: string }[]
@@ -32,11 +34,11 @@ interface Snapshot {
   services: number
   nodeMetrics: NodeMetrics[]
   podMetrics: PodMetrics[]
-  error: string | null
+  error: KubeApiError | null
   /** metrics-server is absent from the cluster (an expected state). */
   metricsAbsent: boolean
   /** Metrics request failed for another reason (timeout, forbidden, ...). */
-  metricsError: string | null
+  metricsError: KubeApiError | null
 }
 
 const EMPTY: Snapshot = {
@@ -138,14 +140,12 @@ export default function OverviewPage(): React.ReactElement {
       const depRes = pick(dep)
       const svcRes = pick(svc)
 
-      let error: string | null = null
+      let error: KubeApiError | null = null
       if (nodes.status === 'rejected') {
-        error = nodes.reason instanceof Error ? nodes.reason.message : String(nodes.reason)
+        error = toKubeApiError(nodes.reason)
       } else if (nodesRes?.error) {
         // In-band failure (403/timeout/...): tiles must not read as "0 resources".
-        error = nodesRes.error.hint
-          ? `${nodesRes.error.message} — ${nodesRes.error.hint}`
-          : nodesRes.error.message
+        error = nodesRes.error
       }
 
       // Metrics: distinguish "metrics-server absent" from a failed request —
@@ -155,11 +155,7 @@ export default function OverviewPage(): React.ReactElement {
       const metricsErrs = [tnRes?.error, tpRes?.error].filter((e) => e != null)
       const metricsHard = metricsErrs.find((e) => e.code !== 'notFound')
       const metricsAbsent = metricsErrs.length > 0 && !metricsHard
-      const metricsError = metricsHard
-        ? metricsHard.hint
-          ? `${metricsHard.message} — ${metricsHard.hint}`
-          : metricsHard.message
-        : null
+      const metricsError = metricsHard ?? null
 
       setSnap({
         context: ctxVal?.context ?? null,
@@ -176,7 +172,7 @@ export default function OverviewPage(): React.ReactElement {
       })
       setUpdatedAt(Date.now())
     } catch (err) {
-      setSnap((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }))
+      setSnap((s) => ({ ...s, error: toKubeApiError(err) }))
     } finally {
       setLoading(false)
     }
@@ -208,13 +204,6 @@ export default function OverviewPage(): React.ReactElement {
 
   const readyNodes = rows.filter((r) => r.ready).length
   const hasMetrics = snap.nodeMetrics.length > 0
-  // Branch on the real metrics state: a failed request (timeout, forbidden,
-  // ...) must not masquerade as "metrics-server not installed".
-  const metricsNote = snap.metricsError
-    ? `Metrics request failed: ${snap.metricsError}`
-    : snap.metricsAbsent
-      ? 'metrics-server not detected — resource usage is unavailable, showing counts only.'
-      : null
 
   const cpuTotal = totalOf(
     snap.nodeMetrics,
@@ -262,25 +251,28 @@ export default function OverviewPage(): React.ReactElement {
         </div>
       </header>
 
-      {snap.error && (
-        <div style={{ marginBottom: 16, padding: 10, borderRadius: 6, border: '1px solid #e5534b55', background: '#e5534b18', color: '#e5534b', fontSize: 12 }}>
-          {snap.error}
+      {snap.error && <div style={{ marginBottom: 16 }}><CallError error={snap.error} onRetry={() => void load()} /></div>}
+
+      {/* Branch on the real metrics state: a failed request (timeout, forbidden,
+          ...) must not masquerade as "metrics-server not installed". */}
+      {snap.metricsError && !loading && (
+        <div style={{ marginBottom: 16 }}>
+          <CallError compact error={{ code: snap.metricsError.code, message: `Metrics request failed: ${snap.metricsError.message}`, hint: snap.metricsError.hint }} />
         </div>
       )}
-
-      {metricsNote && !loading && (
+      {snap.metricsAbsent && !snap.metricsError && !loading && (
         <div
           style={{
             marginBottom: 16,
             padding: 10,
             borderRadius: 6,
-            border: `1px solid ${snap.metricsError ? '#e5534b55' : 'var(--border)'}`,
-            background: snap.metricsError ? '#e5534b18' : 'var(--bg-elev)',
-            color: snap.metricsError ? '#e5534b' : 'var(--text-dim)',
+            border: '1px solid var(--border)',
+            background: 'var(--bg-elev)',
+            color: 'var(--text-dim)',
             fontSize: 12
           }}
         >
-          {metricsNote}
+          metrics-server not detected — resource usage is unavailable, showing counts only.
         </div>
       )}
 

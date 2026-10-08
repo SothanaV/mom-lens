@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { dump, load } from 'js-yaml'
-import type { ResourceKind } from '@shared/types'
+import type { KubeApiError, ResourceKind } from '@shared/types'
 import { apiVersionOf, getCreateTemplate } from '@shared/types'
+import { CallError, toKubeApiError } from '@renderer/components/ui/CallError'
 import YamlEditor from './YamlEditor'
 
 interface CreateModalProps {
@@ -27,7 +28,7 @@ function initialYaml(kind: ResourceKind, namespace?: string | null): string {
 
 export default function CreateModal({ kind, namespace, onClose, onSaved }: CreateModalProps) {
   const [text, setText] = useState(() => initialYaml(kind, namespace))
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<KubeApiError | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -44,28 +45,36 @@ export default function CreateModal({ kind, namespace, onClose, onSaved }: Creat
     try {
       const parsed = load(text)
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        setError('Document must be a single YAML mapping.')
+        setError({ code: 'invalid', message: 'Document must be a single YAML mapping.' })
         return
       }
     } catch (err) {
-      setError(`Invalid YAML: ${err instanceof Error ? err.message : String(err)}`)
+      setError({
+        code: 'invalid',
+        message: `Invalid YAML: ${err instanceof Error ? err.message : String(err)}`
+      })
       return
     }
     if (!window.api) {
-      setError('Cluster API (window.api) is not available.')
+      setError({
+        code: 'unreachable',
+        message: 'Cluster API (window.api) is not available.'
+      })
       return
     }
     setSaving(true)
     try {
       const res = await window.api.k8s.applyYaml(text)
       if (!res.ok) {
-        setError(res.message ?? 'Apply failed.')
+        setError(
+          res.error ?? { code: 'unknown', message: res.message ?? 'Apply failed.' }
+        )
         setSaving(false)
         return
       }
       onSaved(res.message ?? `${kind.kind} created.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(toKubeApiError(err))
       setSaving(false)
     }
   }
@@ -110,9 +119,7 @@ export default function CreateModal({ kind, namespace, onClose, onSaved }: Creat
 
         <YamlEditor value={text} onChange={setText} height="340px" editable />
 
-        {error && (
-          <div style={{ color: '#e5534b', whiteSpace: 'pre-wrap', fontSize: 12 }}>{error}</div>
-        )}
+        {error && <CallError compact error={error} />}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button className="btn" type="button" onClick={onClose} disabled={saving}>
