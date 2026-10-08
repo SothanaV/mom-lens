@@ -31,12 +31,14 @@ export default function AppLayout(): React.ReactElement {
     setShell((s) => ({ ...s, status: 'loading', error: null }))
     api.k8s
       .currentContext()
-      .then((ctx) => {
+      .then((res) => {
         if (cancelled) return
         setShell({
-          context: ctx,
-          status: ctx ? 'connected' : 'error',
-          error: ctx ? null : 'No active kube context'
+          context: res.context ?? null,
+          status: res.context ? 'connected' : 'error',
+          error: res.error?.hint
+            ? `${res.error.message} — ${res.error.hint}`
+            : (res.error?.message ?? 'No active kube context')
         })
       })
       .catch((err: unknown) => {

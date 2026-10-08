@@ -66,10 +66,96 @@ export interface ListPageRequest extends ListRequest {
   continueToken?: string
 }
 
-export interface ListPage {
+export interface ListPage extends KubeResult {
   items: KubeObject[]
   /** Present while the server has more pages left. */
   continueToken?: string
+}
+
+/** Result of a list call: items plus an in-band failure, so [].length 0 always means truly zero. */
+export interface KubeListResult extends KubeResult {
+  items: KubeObject[]
+}
+
+/** Result of a single-object read: the object on success, an in-band failure on error.
+ *
+ * This is deliberately NOT a `{ obj?, error? }` envelope: keeping the raw API
+ * object as the success payload preserves the frozen `Promise<KubeObject>`
+ * contract (A6) so resource-catalog renderers keep working unchanged. The one
+ * collision — a real object with a top-level `error` key — cannot occur for
+ * reads through this path: per Kubernetes API convention `error` is not a
+ * top-level field of any API object, and API *failures* arrive as `Status`,
+ * which this handler never returns as a success body. Consumers check
+ * `result.error` (via `isKubeApiError`) before treating the payload as object
+ * data, so the envelope types above need no such caveat.
+ */
+export type GetResult = KubeObject & KubeResult
+
+/** Result of one metrics-server probe (nodes or pods), surfaced via topNodes/topPods. */
+export interface MetricsResult<T> extends KubeResult {
+  items: T[]
+  /** False when the request failed for a reason other than metrics-server being absent. */
+  available: boolean
+}
+
+export type NodeMetricsResult = MetricsResult<NodeMetrics>
+export type PodMetricsResult = MetricsResult<PodMetrics>
+
+/** Failure classes every failing k8s call reports. */
+export type KubeErrorCode =
+  | 'forbidden'
+  | 'notFound'
+  | 'timeout'
+  | 'unreachable'
+  | 'conflict'
+  | 'invalid'
+  | 'unknown'
+
+/**
+ * The one typed error shape that crosses IPC for a failing k8s call.
+ * `code` is the discriminant the renderer narrows on; `message` is always
+ * non-empty and human-safe; `hint` optionally says what to do next.
+ */
+export interface KubeApiError {
+  code: KubeErrorCode
+  message: string
+  hint?: string
+}
+
+/** Mixed into result objects that report failure in-band (instead of faking data). */
+export interface KubeResult {
+  error?: KubeApiError
+}
+
+/** Result of listing the kubeconfig contexts; `error` set when the kubeconfig fails to load. */
+export interface KubeContextsResult extends KubeResult {
+  items: KubeContext[]
+}
+
+/** Result of reading the current context: `context` absent + `error` absent means "none selected". */
+export interface CurrentContextResult extends KubeResult {
+  context?: ContextInfo
+}
+
+const KUBE_ERROR_CODES: readonly KubeErrorCode[] = [
+  'forbidden',
+  'notFound',
+  'timeout',
+  'unreachable',
+  'conflict',
+  'invalid',
+  'unknown'
+]
+
+/** True when `value` is an in-band {@link KubeApiError} (and not a real API object). */
+export function isKubeApiError(value: unknown): value is KubeApiError {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    typeof v.message === 'string' &&
+    typeof v.code === 'string' &&
+    KUBE_ERROR_CODES.includes(v.code as KubeErrorCode)
+  )
 }
 
 export interface LogRequest {
@@ -126,6 +212,8 @@ export interface PodMetrics {
 export interface ActionResult {
   ok: boolean
   message?: string
+  /** Typed failure classification (additive: `ok`/`message` keep their old meaning). */
+  error?: KubeApiError
 }
 
 /** Availability of a local LLM runner (opencode). */
@@ -161,18 +249,18 @@ export interface AiDone {
 /** The API exposed on `window.api` by the preload script. */
 export interface SoLensApi {
   k8s: {
-    listContexts(): Promise<KubeContext[]>
+    listContexts(): Promise<KubeContextsResult>
     useContext(name: string): Promise<ContextInfo>
-    currentContext(): Promise<ContextInfo | null>
-    listNodes(): Promise<KubeObject[]>
-    listNamespaces(): Promise<KubeObject[]>
-    listResources(req: ListRequest): Promise<KubeObject[]>
+    currentContext(): Promise<CurrentContextResult>
+    listNodes(): Promise<KubeListResult>
+    listNamespaces(): Promise<KubeListResult>
+    listResources(req: ListRequest): Promise<KubeListResult>
     listResourcesPage(req: ListPageRequest): Promise<ListPage>
-    getResource(ref: ResourceScopeRef): Promise<KubeObject>
+    getResource(ref: ResourceScopeRef): Promise<GetResult>
     deleteResource(ref: ResourceScopeRef): Promise<ActionResult>
     applyYaml(yaml: string): Promise<ActionResult>
-    topNodes(): Promise<NodeMetrics[]>
-    topPods(namespace?: string): Promise<PodMetrics[]>
+    topNodes(): Promise<NodeMetricsResult>
+    topPods(namespace?: string): Promise<PodMetricsResult>
     watchStart(id: string, req: ListRequest): Promise<boolean>
     watchStop(id: string): Promise<boolean>
     logsStart(id: string, req: LogRequest): Promise<boolean>

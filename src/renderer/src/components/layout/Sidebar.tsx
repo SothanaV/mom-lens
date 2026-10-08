@@ -41,8 +41,8 @@ export default function Sidebar({ shell, onReload }: SidebarProps): React.ReactE
     if (!api?.k8s?.listContexts) return
     api.k8s
       .listContexts()
-      .then((list) => {
-        if (!cancelled) setContexts(list)
+      .then((res) => {
+        if (!cancelled) setContexts(res.items)
       })
       .catch(() => undefined)
     return () => {

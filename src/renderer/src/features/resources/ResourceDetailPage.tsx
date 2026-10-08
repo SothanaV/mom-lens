@@ -173,6 +173,8 @@ export default function ResourceDetailPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [podMetrics, setPodMetrics] = useState<PodMetrics | null>(null)
   const [nodeMetrics, setNodeMetrics] = useState<NodeMetrics | null>(null)
+  // Why metrics are missing here: null=none/absent, otherwise the failure text.
+  const [metricsNote, setMetricsNote] = useState<string | null>(null)
 
   useEffect(() => {
     if (!kind || !name || !window.api) return
@@ -183,7 +185,12 @@ export default function ResourceDetailPage() {
       .getResource({ scope: kind, namespace, name })
       .then((o) => {
         if (cancelled) return
-        setObj(o)
+        // In-band failure: never render an error result as if it were an object.
+        if (o.error) {
+          setError(o.error.hint ? `${o.error.message} — ${o.error.hint}` : o.error.message)
+        } else {
+          setObj(o)
+        }
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -207,22 +214,34 @@ export default function ResourceDetailPage() {
       if (isPod) {
         api.k8s
           .topPods(namespace)
-          .then((list) => {
-            if (!cancelled) {
-              setPodMetrics(list.find((m) => m.namespace === namespace && m.name === name) ?? null)
-            }
+          .then((res) => {
+            if (cancelled) return
+            setPodMetrics(
+              res.items.find((m) => m.namespace === namespace && m.name === name) ?? null
+            )
+            // Absent metrics-server (notFound) reads as plain "no data";
+            // any other failure states its real reason instead.
+            setMetricsNote(res.error && res.error.code !== 'notFound' ? res.error.message : null)
           })
           .catch(() => {
-            if (!cancelled) setPodMetrics(null)
+            if (!cancelled) {
+              setPodMetrics(null)
+              setMetricsNote('metrics request failed')
+            }
           })
       } else {
         api.k8s
           .topNodes()
-          .then((list) => {
-            if (!cancelled) setNodeMetrics(list.find((m) => m.name === name) ?? null)
+          .then((res) => {
+            if (cancelled) return
+            setNodeMetrics(res.items.find((m) => m.name === name) ?? null)
+            setMetricsNote(res.error && res.error.code !== 'notFound' ? res.error.message : null)
           })
           .catch(() => {
-            if (!cancelled) setNodeMetrics(null)
+            if (!cancelled) {
+              setNodeMetrics(null)
+              setMetricsNote('metrics request failed')
+            }
           })
       }
     }
@@ -407,6 +426,11 @@ export default function ResourceDetailPage() {
           {kind.resource === 'pods' && namespace && (
             <section>
               <h3>Metrics</h3>
+              {metricsNote && (
+                <div className="chip mono" style={{ color: '#e5534b', marginBottom: 8 }}>
+                  {metricsNote}
+                </div>
+              )}
               <table className="table">
                 <tbody>
                   <tr>
@@ -425,6 +449,11 @@ export default function ResourceDetailPage() {
           {kind.resource === 'nodes' && (
             <section>
               <h3>Metrics</h3>
+              {metricsNote && (
+                <div className="chip mono" style={{ color: '#e5534b', marginBottom: 8 }}>
+                  {metricsNote}
+                </div>
+              )}
               <table className="table">
                 <tbody>
                   <tr>

@@ -33,6 +33,10 @@ interface Snapshot {
   nodeMetrics: NodeMetrics[]
   podMetrics: PodMetrics[]
   error: string | null
+  /** metrics-server is absent from the cluster (an expected state). */
+  metricsAbsent: boolean
+  /** Metrics request failed for another reason (timeout, forbidden, ...). */
+  metricsError: string | null
 }
 
 const EMPTY: Snapshot = {
@@ -44,7 +48,9 @@ const EMPTY: Snapshot = {
   services: 0,
   nodeMetrics: [],
   podMetrics: [],
-  error: null
+  error: null,
+  metricsAbsent: false,
+  metricsError: null
 }
 
 function requireKind(resource: string): ResourceKind {
@@ -125,27 +131,48 @@ export default function OverviewPage(): React.ReactElement {
         api.k8s.topPods()
       ])
 
-      const nodesVal = pick(nodes)
-      const nsVal = pick(ns)
-      const podsVal = pick(pods)
-      const depVal = pick(dep)
-      const svcVal = pick(svc)
+      const ctxVal = pick(ctx)
+      const nodesRes = pick(nodes)
+      const nsRes = pick(ns)
+      const podsRes = pick(pods)
+      const depRes = pick(dep)
+      const svcRes = pick(svc)
 
       let error: string | null = null
       if (nodes.status === 'rejected') {
         error = nodes.reason instanceof Error ? nodes.reason.message : String(nodes.reason)
+      } else if (nodesRes?.error) {
+        // In-band failure (403/timeout/...): tiles must not read as "0 resources".
+        error = nodesRes.error.hint
+          ? `${nodesRes.error.message} — ${nodesRes.error.hint}`
+          : nodesRes.error.message
       }
 
+      // Metrics: distinguish "metrics-server absent" from a failed request —
+      // a timeout/forbidden must never masquerade as "not installed".
+      const tnRes = pick(tn)
+      const tpRes = pick(tp)
+      const metricsErrs = [tnRes?.error, tpRes?.error].filter((e) => e != null)
+      const metricsHard = metricsErrs.find((e) => e.code !== 'notFound')
+      const metricsAbsent = metricsErrs.length > 0 && !metricsHard
+      const metricsError = metricsHard
+        ? metricsHard.hint
+          ? `${metricsHard.message} — ${metricsHard.hint}`
+          : metricsHard.message
+        : null
+
       setSnap({
-        context: pick(ctx) ?? null,
-        nodes: nodesVal ?? [],
-        namespaces: nsVal?.length ?? 0,
-        pods: podsVal?.length ?? 0,
-        deployments: depVal?.length ?? 0,
-        services: svcVal?.length ?? 0,
-        nodeMetrics: pick(tn) ?? [],
-        podMetrics: pick(tp) ?? [],
-        error
+        context: ctxVal?.context ?? null,
+        nodes: nodesRes?.items ?? [],
+        namespaces: nsRes?.items.length ?? 0,
+        pods: podsRes?.items.length ?? 0,
+        deployments: depRes?.items.length ?? 0,
+        services: svcRes?.items.length ?? 0,
+        nodeMetrics: tnRes?.items ?? [],
+        podMetrics: tpRes?.items ?? [],
+        error,
+        metricsAbsent,
+        metricsError
       })
       setUpdatedAt(Date.now())
     } catch (err) {
@@ -181,6 +208,13 @@ export default function OverviewPage(): React.ReactElement {
 
   const readyNodes = rows.filter((r) => r.ready).length
   const hasMetrics = snap.nodeMetrics.length > 0
+  // Branch on the real metrics state: a failed request (timeout, forbidden,
+  // ...) must not masquerade as "metrics-server not installed".
+  const metricsNote = snap.metricsError
+    ? `Metrics request failed: ${snap.metricsError}`
+    : snap.metricsAbsent
+      ? 'metrics-server not detected — resource usage is unavailable, showing counts only.'
+      : null
 
   const cpuTotal = totalOf(
     snap.nodeMetrics,
@@ -234,9 +268,19 @@ export default function OverviewPage(): React.ReactElement {
         </div>
       )}
 
-      {!hasMetrics && !loading && (
-        <div style={{ marginBottom: 16, padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elev)', color: 'var(--text-dim)', fontSize: 12 }}>
-          metrics-server not detected — resource usage is unavailable, showing counts only.
+      {metricsNote && !loading && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 10,
+            borderRadius: 6,
+            border: `1px solid ${snap.metricsError ? '#e5534b55' : 'var(--border)'}`,
+            background: snap.metricsError ? '#e5534b18' : 'var(--bg-elev)',
+            color: snap.metricsError ? '#e5534b' : 'var(--text-dim)',
+            fontSize: 12
+          }}
+        >
+          {metricsNote}
         </div>
       )}
 
@@ -262,6 +306,7 @@ export default function OverviewPage(): React.ReactElement {
           used={cpuTotal.used}
           capacity={cpuTotal.cap}
           format={formatCpu}
+          note={snap.metricsError ? 'metrics request failed' : undefined}
         />
         <UsageTile
           label="Memory"
@@ -269,6 +314,7 @@ export default function OverviewPage(): React.ReactElement {
           used={memTotal.used}
           capacity={memTotal.cap}
           format={formatGiB}
+          note={snap.metricsError ? 'metrics request failed' : undefined}
         />
       </section>
 
@@ -312,7 +358,13 @@ export default function OverviewPage(): React.ReactElement {
         <h2 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>Top Pods</h2>
         {topPods.length === 0 ? (
           <div style={{ color: 'var(--text-dim)', padding: 12 }}>
-            {loading ? 'Loading pod metrics…' : hasMetrics ? 'No pod metrics available.' : 'Pod metrics unavailable (metrics-server).'}
+            {loading
+              ? 'Loading pod metrics…'
+              : snap.metricsError
+                ? 'Pod metrics unavailable: metrics request failed.'
+                : hasMetrics
+                  ? 'No pod metrics available.'
+                  : 'Pod metrics unavailable (metrics-server).'}
           </div>
         ) : (
           <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -392,13 +444,16 @@ function UsageTile({
   used,
   capacity,
   format,
-  hasData
+  hasData,
+  note
 }: {
   label: string
   used: number | undefined
   capacity: number | undefined
   format: (n: number | undefined) => string
   hasData: boolean
+  /** Why there is no data; defaults to the old "not detected" wording. */
+  note?: string
 }): React.ReactElement {
   const labelStyle: React.CSSProperties = {
     color: 'var(--text-dim)',
@@ -413,7 +468,7 @@ function UsageTile({
       <div className="panel" style={{ padding: 14, height: '100%', boxSizing: 'border-box' }}>
         <div style={labelStyle}>{label}</div>
         <div style={{ fontSize: 22, fontWeight: 600, marginTop: 4, color: 'var(--text-dim)' }}>n/a</div>
-        <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 2 }}>metrics-server not detected</div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 2 }}>{note ?? 'metrics-server not detected'}</div>
       </div>
     )
   }

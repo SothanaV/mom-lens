@@ -1,5 +1,6 @@
 import { KubeConfig } from '@kubernetes/client-node'
-import type { ContextInfo, KubeContext } from '@shared/types'
+import type { ContextInfo, KubeContext, KubeContextsResult, CurrentContextResult } from '@shared/types'
+import { toKubeError } from './errors'
 
 let kc: KubeConfig | null = null
 
@@ -24,11 +25,22 @@ function buildContextInfo(config: KubeConfig, name: string): ContextInfo | null 
   }
 }
 
-export function listContexts(): KubeContext[] {
+/**
+ * Contexts from the active kubeconfig. On a load/parse failure this returns
+ * an empty list carrying the real `error` instead of silently looking like
+ * "no clusters configured".
+ *
+ * IMPORTANT: this is a PLAIN OBJECT envelope (`{ items, error? }`), never an
+ * array with an extra `error` property — Electron's contextBridge rebuilds
+ * arrays index-by-index (v8::Array::New(len)), silently dropping non-index
+ * own properties, so an array hybrid would lose `error` before the renderer
+ * ever sees it.
+ */
+export function listContexts(): KubeContextsResult {
   try {
     const config = getKubeConfig()
     const current = config.getCurrentContext()
-    return config.getContexts().map((c) => {
+    const items: KubeContext[] = config.getContexts().map((c) => {
       const ctx = config.getContextObject(c.name)
       return {
         name: c.name,
@@ -38,8 +50,9 @@ export function listContexts(): KubeContext[] {
         current: c.name === current
       }
     })
-  } catch {
-    return []
+    return { items }
+  } catch (err) {
+    return { items: [], error: toKubeError(err) }
   }
 }
 
@@ -57,13 +70,19 @@ export function useContext(name: string): ContextInfo {
   return info
 }
 
-export function currentContext(): ContextInfo | null {
+/**
+ * Current context, or `{}` when none is selected. A kubeconfig that fails to
+ * load now reports the real `error` instead of looking "Disconnected".
+ */
+export function currentContext(): CurrentContextResult {
   try {
     const config = getKubeConfig()
     const name = config.getCurrentContext()
-    if (!name) return null
-    return buildContextInfo(config, name)
-  } catch {
-    return null
+    if (!name) return {}
+    const info = buildContextInfo(config, name)
+    if (!info) return {}
+    return { context: info }
+  } catch (err) {
+    return { error: toKubeError(err) }
   }
 }

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { KubeObject } from '@shared/types'
 
 interface NamespaceSelectProps {
   value: string
@@ -92,8 +91,12 @@ export default function NamespaceSelect({
     setLoading(true)
     setError(null)
     try {
-      const items: KubeObject[] = await api.k8s.listNamespaces()
-      const list = items
+      const res = await api.k8s.listNamespaces()
+      if (res.error) {
+        setError(res.error.message)
+        return
+      }
+      const list = res.items
         .map((item) => item.metadata?.name)
         .filter((name): name is string => Boolean(name))
         .sort()

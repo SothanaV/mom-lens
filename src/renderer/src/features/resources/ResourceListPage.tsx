@@ -73,8 +73,14 @@ export default function ResourceListPage() {
       .listResourcesPage({ ...req, limit: pageSize })
       .then((page) => {
         if (cancelled) return
-        setItems(sortItems(page.items, showNamespace))
-        setContinueToken(page.continueToken)
+        // In-band failure: a 403/404 never arrives as an empty page again.
+        if (page.error) {
+          setError(page.error.hint ? `${page.error.message} — ${page.error.hint}` : page.error.message)
+        } else {
+          setError(null)
+          setItems(sortItems(page.items, showNamespace))
+          setContinueToken(page.continueToken)
+        }
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -97,6 +103,10 @@ export default function ResourceListPage() {
         limit: pageSize,
         continueToken
       })
+      if (page.error) {
+        setError(page.error.hint ? `${page.error.message} — ${page.error.hint}` : page.error.message)
+        return
+      }
       setItems((prev) => {
         const seen = new Set(prev.map((o) => objKey(o)))
         const merged = prev.concat(page.items.filter((o) => !seen.has(objKey(o))))

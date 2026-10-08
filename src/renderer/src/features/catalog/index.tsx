@@ -33,9 +33,16 @@ export default function CatalogPage(): React.ReactElement {
       if (ctxRes.status === 'rejected') {
         throw ctxRes.reason
       }
-      const list = ctxRes.value ?? []
+      const list = ctxRes.value.items ?? []
       setContexts(list)
-      setCurrent(curRes.status === 'fulfilled' ? curRes.value : null)
+      const cur = curRes.status === 'fulfilled' ? curRes.value : undefined
+      setCurrent(cur?.context ?? null)
+      if (ctxRes.value.error) {
+        // kubeconfig failed to load: list is empty but the reason is real
+        setError(ctxRes.value.error.message)
+        setState('error')
+        return
+      }
       setState(list.length === 0 ? 'empty' : 'ready')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
